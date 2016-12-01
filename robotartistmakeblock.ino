@@ -43,6 +43,23 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
   enum Command : uint8_t{NoCommand, SignOn, SetPin, MoveTo, Move, Run, RunSpeed, SetMaxSpeed, SetAcceleration, SetSpeed, SetCurrentPosition, RunToPosition, RunSpeedToPosition, DisableOutputs, EnableOutputs, GetDistanceToGo, GetTargetPositon, GetCurrentPosition,Crash, Echo  } ;
   enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
 
+/*
+int dirPin = mePort[PORT_1].s1;//the direction pin connect to Base Board PORT1 SLOT1
+int stpPin = mePort[PORT_1].s2;//the Step pin connect to Base Board PORT1 SLOT2
+
+// commands are direction, steps, delay between steps (speed)
+void step(boolean dir,int steps)
+{
+  digitalWrite(dirPin,dir);
+  delay(50);
+  for(int i=0;i<steps;i++)  {
+    digitalWrite(stpPin, HIGH);
+    delayMicroseconds(800);
+    digitalWrite(stpPin, LOW);
+    delayMicroseconds(800); 
+  }
+}
+*/
 class xyRobot
 {    
   public:
@@ -91,7 +108,6 @@ void buzz(int count){
       delay(i+1*1000);
       buzzerOff();
     }
-  
   }
 }
 
@@ -124,8 +140,11 @@ void signon(){
   Serial.println("bob");
 }
 
-void setup(){   
- 
+void setup(){  
+  /* 
+  pinMode(dirPin, OUTPUT);
+  pinMode(stpPin, OUTPUT);
+*/
   robot.begin(19200);
   buzz(1);
 }
@@ -133,8 +152,9 @@ void setup(){
 void loop(){
   
   robot.read();
-  stepper1.run();
-  stepper2.run();
+ 
+  stepper1.runToPosition();
+  //stepper2.run();
 }
 
 void xyRobot::begin(int baud){
@@ -146,11 +166,16 @@ void xyRobot::begin(int baud){
   }
   
   // Change these to suit your stepper if you want, but set some reasonable defaults now
-  stepper1.setMaxSpeed(1000);
+  stepper1.setMaxSpeed(1000.0f);
   stepper1.setAcceleration(20000);
-  stepper2.setMaxSpeed(1000);
+  stepper2.setMaxSpeed(1000.0f);
   stepper2.setAcceleration(20000);
+
+  stepper1.setSpeed(900.0f);
+  stepper2.setSpeed(90.0f);
+
 }
+
 
 //bugbug keep this wrapper until we are using getFloat, (a reminder)
 float getFloat(){
@@ -158,7 +183,7 @@ float getFloat(){
 }
 
 void xyRobot::exec(){
-  long l;
+  int l;
   switch(getCommand()){
    case Move:
       l = Serial.parseInt();
@@ -166,7 +191,6 @@ void xyRobot::exec(){
       stepper1.move(l);
       break;
    case SignOn:
-      stepper1.move(200);
       signon();
       return;
    }

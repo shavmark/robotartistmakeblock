@@ -42,7 +42,6 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
 
   enum Command : uint8_t{NoCommand, SignOn, SetPin, MoveTo, Move, Run, RunSpeed, SetMaxSpeed, SetAcceleration, SetSpeed, SetCurrentPosition, RunToPosition, RunSpeedToPosition, DisableOutputs, EnableOutputs, GetDistanceToGo, GetTargetPositon, GetCurrentPosition,Crash, Echo  } ;
   enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
-  enum StepperID :uint8_t {IDstepper1=0, IDstepper2=1};
 
 class xyRobot
 {    
@@ -50,7 +49,8 @@ class xyRobot
     
     void begin(int baud);
     int read();         // must be called regularly to clean out Serial buffer
-    void IDPacket(Command, uint8_t data1, uint8_t data2);
+    void BinaryPacket(Command, uint8_t data1, uint8_t data2);
+    void AsciiPacket(Command, uint8_t data1, uint8_t data2);
     
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
@@ -59,14 +59,13 @@ class xyRobot
    * other data read by command itself
    */
 
-    StepperID getStepperId(){return packet[0];}
-    Command getCommand() {return packet[1];}
+    uint8_t getStepperId(){return packet[1];}
+    uint8_t getCommand() {return packet[2];}
     MeStepper& getStepper();
   private:
     void exec();
     // internal variables used for reading messages
-    const int packetsize = 2;
-    uint8_t packet[2];  // temporary values, moved after we confirm checksum
+    uint8_t packet[3];  // temporary values, moved after we confirm checksum
     int index=-1;              // -1 = waiting for new packet
 };
 
@@ -78,15 +77,18 @@ MeStepper stepper2(PORT_2);
 // simple wrapper to get correct stepper, enum helps assure range is ok
 MeStepper& xyRobot::getStepper(){
   switch(getStepperId()){
-    case IDstepper1:
+    case 0:
     return stepper1;
-    case IDstepper2:
+    case 1:
     return stepper2;
   }
 }
 
 // send everything through here so we can change to print if we need to for example
-void echo(uint8_t val){
+void print(uint8_t val){
+  Serial.print(val);
+}
+void write(uint8_t val){
   Serial.write(val);
 }
 
@@ -101,17 +103,25 @@ void buzz(int count){
   }
 }
 
-void xyRobot::IDPacket(Command cmd, uint8_t data1, uint8_t data2)  {
+// send binary
+void xyRobot::BinaryPacket(Command cmd, uint8_t data1, uint8_t data2)  {
   
-  echo(0xee);
-  echo(data1);// ARM ID for example
-  echo(data2); 
-  echo(cmd); 
-  echo((255 - (data1+data2+cmd)%256));  
+  write(0xee);
+  write(data1);// ARM ID for example
+  write(data2); 
+  write(cmd); 
+  write((255 - (data1+data2+cmd)%256));  
+}
+void xyRobot::AsciiPacket(Command cmd, uint8_t data1, uint8_t data2)  {
+// left off here, fix client code to handle string results  
+  write(0xee);
+  write((255 - (data1+data2+cmd)%256));  
+  print(data1);
+  print(data2); 
+  print(cmd); 
 }
 
 void signon(){
-  buzz(3);
   robot.IDPacket(SignOn, MAKERBOT_ID, IKM_MAKERBOTXY);
   Serial.println("Makeblock flatbed");
   Serial.println("bob");
@@ -133,6 +143,7 @@ void loop(){
 void xyRobot::begin(int baud){
   
   Serial.begin(baud);
+  Serial.setTimeout(5*1000);
   while (!Serial) {
      ; // wait for serial port to connect. Needed for native USB
   }
@@ -145,28 +156,17 @@ void xyRobot::begin(int baud){
   index = -1;
 }
 
-void block(){
- 
-   while(Serial.available() == 0){
-     ;
-   }
-   return;
+//bugbug keep this wrapper until we are using getFloat, (a reminder)
+float getFloat(){
+  return Serial.parseFloat(); //bugbug does not seem to work
 }
-long getInt(){
-  block();
-  uint8_t b1 = (uint8_t)Serial.read();// high word, little endian
-  uint8_t b2 = (uint8_t)Serial.read();
-  return (b1 << 8) + b1;
-}
-long getFloat(){
-  return getInt()/100; // 50 is .5, 99 is .99
-  //return Serial.parseFloat(); //bugbug does not seem to work
-}
+
 void xyRobot::exec(){
   long l;
-  switch(packet[1]){
+      stepper1.move(200);
+  switch(getCommand()){
    case Move:
-      l = getInt();
+      l = Serial.parseInt();
       IDPacket(getCommand(), l, getStepperId());
       stepper1.move(l);
       break;
@@ -179,7 +179,17 @@ void xyRobot::exec(){
 
 // does not send serial data
 int xyRobot::read(){
-
+if (Serial.readBytes(packet, sizeof packet) == sizeof packet){
+  if (packet[0] == 0xee){
+    buzz(1);
+      exec();
+      memset(packet, 0, sizeof packet);
+      return 1;
+  }
+}
+  return 0;
+}
+/*
    while(Serial.available() > 0){
    
         if(index == -1){         // looking for new packet
@@ -190,17 +200,20 @@ int xyRobot::read(){
             }
         }
         else   if (index >= 0){
-            if(index == packetsize){ // packet complete
+            if(index == sizeof packet){ // packet complete
                 exec();
                 memset(packet, 0, sizeof packet);
                 index = -1;
                 return 1;
             }
-            else if (index < packetsize){
+            else if (index < sizeof packet){
               packet[index] = (uint8_t)Serial.read();
             }
             index++;
         }
     }
     return 0;
+ 
 }
+ */
+  

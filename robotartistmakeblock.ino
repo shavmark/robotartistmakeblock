@@ -40,35 +40,20 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
  *    18. void MeStepper::enableOutputs();
  */
 
-  enum Command : uint8_t{NoCommand, SignOn, SetPin, MoveTo, Move, Run, RunSpeed, SetMaxSpeed, SetAcceleration, SetSpeed, SetCurrentPosition, RunToPosition, RunSpeedToPosition, DisableOutputs, EnableOutputs, GetDistanceToGo, GetTargetPositon, GetCurrentPosition,Crash, Echo  } ;
+  enum Command : uint8_t{NoCommand, SignOn, SetPin, MoveTo, Move, Run, RunSpeed, SetMaxSpeed, SetAcceleration, SetSpeed, SetCurrentPosition, RunToPosition, RunSpeedToPosition, DisableOutputs, EnableOutputs, GetDistanceToGo, GetTargetPositon, GetCurrentPosition,  Crash, Echo  } ;
   enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
-
-/*
-int dirPin = mePort[PORT_1].s1;//the direction pin connect to Base Board PORT1 SLOT1
-int stpPin = mePort[PORT_1].s2;//the Step pin connect to Base Board PORT1 SLOT2
-
-// commands are direction, steps, delay between steps (speed)
-void step(boolean dir,int steps)
-{
-  digitalWrite(dirPin,dir);
-  delay(50);
-  for(int i=0;i<steps;i++)  {
-    digitalWrite(stpPin, HIGH);
-    delayMicroseconds(800);
-    digitalWrite(stpPin, LOW);
-    delayMicroseconds(800); 
-  }
-}
-*/
-class xyRobot
-{    
+  void BinaryPacket(Command, uint8_t data1, uint8_t data2);
+  void AsciiPacket(Command, long data);
+  void AsciiPacket(Command, float data);
+  void cmdHeader(Command cmd);
+  void buzz(int count);
+  void begin(int baud);
+  void signon();
+  
+class serialData {    
   public:
     
-    void begin(int baud);
     int read();         // must be called regularly to clean out Serial buffer
-    void BinaryPacket(Command, uint8_t data1, uint8_t data2);
-    void AsciiPacket(Command, long data1, long data2);
-    void AsciiPacket(Command, float data1);
     
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
@@ -76,23 +61,52 @@ class xyRobot
    * byte 2 cmd for stepper 
    * other data read by command itself
    */
-
-    uint8_t getStepperId(){return packet[1];}
-    uint8_t getCommand() {return packet[2];}
-    MeStepper& getStepper();
+   uint8_t getStepperId(){return packet[1];}
+   uint8_t getCommand() {return packet[2];}
+   MeStepper& getStepper();
+   
   private:
+  
     void exec();
     // internal variables used for reading messages
     uint8_t packet[3];  // temporary values, moved after we confirm checksum
 };
 
-xyRobot robot;
+serialData data;
 
-MeStepper stepper1(PORT_1); 
+MeStepper stepper1(PORT_1); // would like to make these members of xyRobot but their constructors make it difficult
 MeStepper stepper2(PORT_2); 
 
+void serialData::exec(){
+
+  if (getCommand() == SignOn){
+      signon();
+      return;
+  }
+  
+  switch(getCommand()){
+   case Move:
+      getStepper().move(Serial.parseInt());
+      break;
+   case MoveTo:
+      getStepper().moveTo(Serial.parseInt());
+      break;
+    case SetAcceleration:
+      getStepper().setAcceleration(Serial.parseFloat());
+      break;
+    case SetSpeed:
+      getStepper().setSpeed(Serial.parseFloat());
+      break;
+    case GetCurrentPosition:
+      return AsciiPacket(GetCurrentPosition, getStepper().currentPosition());
+   }
+
+   cmdHeader(getCommand()); // let people know we made it this far
+
+}
+
 // simple wrapper to get correct stepper, enum helps assure range is ok
-MeStepper& xyRobot::getStepper(){
+MeStepper& serialData::getStepper(){
   switch(getStepperId()){
     case 0:
     return stepper1;
@@ -111,53 +125,48 @@ void buzz(int count){
   }
 }
 
-// send binary
-void xyRobot::BinaryPacket(Command cmd, uint8_t data1, uint8_t data2)  {
-  
+// send binary, this is compatable with the Trossen sign on data to make things easier, down to the byte order 
+void BinaryPacket(Command cmd, uint8_t data1, uint8_t data2)  {
   Serial.write(0xee);
   Serial.write(data1);// ARM ID for example
   Serial.write(data2); 
   Serial.write(cmd); 
   Serial.write((255 - (data1+data2+cmd)%256));  
 }
-void xyRobot::AsciiPacket(Command cmd, long data1, long data2)  {
-// left off here, fix client code to handle string results  
+// Command will determine data type
+void cmdHeader(Command cmd){
   Serial.write(0xee);
   Serial.write(cmd); 
-  Serial.println(data1);
-  Serial.println(data2); 
 }
-void xyRobot::AsciiPacket(Command cmd, float data)  {
-// left off here, fix client code to handle string results  
-  Serial.write(0xee);
-  Serial.write(cmd); 
+void AsciiPacket(Command cmd, long data)  {
+  cmdHeader(cmd);
+  Serial.println(data);
+}
+void AsciiPacket(Command cmd, float data)  {
+  cmdHeader(cmd);
   Serial.println(data);
 }
 
 void signon(){
-  robot.BinaryPacket(SignOn, MAKERBOT_ID, IKM_MAKERBOTXY);
+  BinaryPacket(SignOn, MAKERBOT_ID, IKM_MAKERBOTXY);
   Serial.println("Makeblock flatbed");
   Serial.println("bob");
 }
 
 void setup(){  
-  /* 
-  pinMode(dirPin, OUTPUT);
-  pinMode(stpPin, OUTPUT);
-*/
-  robot.begin(19200);
+  begin(19200);
   buzz(1);
 }
 
 void loop(){
   
-  robot.read();
+  data.read();
  
   stepper1.runToPosition();
-  //stepper2.run();
+  stepper2.runToPosition();
 }
 
-void xyRobot::begin(int baud){
+void begin(int baud){
   
   Serial.begin(baud);
   Serial.setTimeout(25*1000);
@@ -171,34 +180,11 @@ void xyRobot::begin(int baud){
   stepper2.setMaxSpeed(1000.0f);
   stepper2.setAcceleration(20000);
 
-  stepper1.setSpeed(900.0f);
-  stepper2.setSpeed(90.0f);
-
 }
 
-
-//bugbug keep this wrapper until we are using getFloat, (a reminder)
-float getFloat(){
-  return Serial.parseFloat(); //bugbug does not seem to work
-}
-
-void xyRobot::exec(){
-  int l;
-  switch(getCommand()){
-   case Move:
-      l = Serial.parseInt();
-      AsciiPacket(getCommand(), l, getStepperId());
-      stepper1.move(l);
-      break;
-   case SignOn:
-      signon();
-      return;
-   }
-
-}
 
 // does not send serial data
-int xyRobot::read(){
+int serialData::read(){
 if (Serial.readBytes(packet, sizeof packet) == sizeof packet){
   if (packet[0] == 0xee){
       exec();
@@ -208,31 +194,4 @@ if (Serial.readBytes(packet, sizeof packet) == sizeof packet){
 }
   return 0;
 }
-/*
-   while(Serial.available() > 0){
-   
-        if(index == -1){         // looking for new packet
-            if(Serial.read() == 0xee){
-               
-              // new packet found
-              index = 0;
-            }
-        }
-        else   if (index >= 0){
-            if(index == sizeof packet){ // packet complete
-                exec();
-                memset(packet, 0, sizeof packet);
-                index = -1;
-                return 1;
-            }
-            else if (index < sizeof packet){
-              packet[index] = (uint8_t)Serial.read();
-            }
-            index++;
-        }
-    }
-    return 0;
- 
-}
- */
   

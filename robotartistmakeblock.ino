@@ -50,7 +50,8 @@ class xyRobot
     void begin(int baud);
     int read();         // must be called regularly to clean out Serial buffer
     void BinaryPacket(Command, uint8_t data1, uint8_t data2);
-    void AsciiPacket(Command, uint8_t data1, uint8_t data2);
+    void AsciiPacket(Command, long data1, long data2);
+    void AsciiPacket(Command, float data1);
     
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
@@ -66,7 +67,6 @@ class xyRobot
     void exec();
     // internal variables used for reading messages
     uint8_t packet[3];  // temporary values, moved after we confirm checksum
-    int index=-1;              // -1 = waiting for new packet
 };
 
 xyRobot robot;
@@ -84,14 +84,6 @@ MeStepper& xyRobot::getStepper(){
   }
 }
 
-// send everything through here so we can change to print if we need to for example
-void print(uint8_t val){
-  Serial.print(val);
-}
-void write(uint8_t val){
-  Serial.write(val);
-}
-
 void buzz(int count){
   if (count > 0){
     for (int i = 0; i < count; ++i){
@@ -106,23 +98,28 @@ void buzz(int count){
 // send binary
 void xyRobot::BinaryPacket(Command cmd, uint8_t data1, uint8_t data2)  {
   
-  write(0xee);
-  write(data1);// ARM ID for example
-  write(data2); 
-  write(cmd); 
-  write((255 - (data1+data2+cmd)%256));  
+  Serial.write(0xee);
+  Serial.write(data1);// ARM ID for example
+  Serial.write(data2); 
+  Serial.write(cmd); 
+  Serial.write((255 - (data1+data2+cmd)%256));  
 }
-void xyRobot::AsciiPacket(Command cmd, uint8_t data1, uint8_t data2)  {
+void xyRobot::AsciiPacket(Command cmd, long data1, long data2)  {
 // left off here, fix client code to handle string results  
-  write(0xee);
-  write((255 - (data1+data2+cmd)%256));  
-  print(data1);
-  print(data2); 
-  print(cmd); 
+  Serial.write(0xee);
+  Serial.write(cmd); 
+  Serial.println(data1);
+  Serial.println(data2); 
+}
+void xyRobot::AsciiPacket(Command cmd, float data)  {
+// left off here, fix client code to handle string results  
+  Serial.write(0xee);
+  Serial.write(cmd); 
+  Serial.println(data);
 }
 
 void signon(){
-  robot.IDPacket(SignOn, MAKERBOT_ID, IKM_MAKERBOTXY);
+  robot.BinaryPacket(SignOn, MAKERBOT_ID, IKM_MAKERBOTXY);
   Serial.println("Makeblock flatbed");
   Serial.println("bob");
 }
@@ -137,13 +134,13 @@ void loop(){
   
   robot.read();
   stepper1.run();
-  //stepper2.run();
+  stepper2.run();
 }
 
 void xyRobot::begin(int baud){
   
   Serial.begin(baud);
-  Serial.setTimeout(5*1000);
+  Serial.setTimeout(25*1000);
   while (!Serial) {
      ; // wait for serial port to connect. Needed for native USB
   }
@@ -153,7 +150,6 @@ void xyRobot::begin(int baud){
   stepper1.setAcceleration(20000);
   stepper2.setMaxSpeed(1000);
   stepper2.setAcceleration(20000);
-  index = -1;
 }
 
 //bugbug keep this wrapper until we are using getFloat, (a reminder)
@@ -163,14 +159,14 @@ float getFloat(){
 
 void xyRobot::exec(){
   long l;
-      stepper1.move(200);
   switch(getCommand()){
    case Move:
       l = Serial.parseInt();
-      IDPacket(getCommand(), l, getStepperId());
+      AsciiPacket(getCommand(), l, getStepperId());
       stepper1.move(l);
       break;
    case SignOn:
+      stepper1.move(200);
       signon();
       return;
    }
@@ -181,7 +177,6 @@ void xyRobot::exec(){
 int xyRobot::read(){
 if (Serial.readBytes(packet, sizeof packet) == sizeof packet){
   if (packet[0] == 0xee){
-    buzz(1);
       exec();
       memset(packet, 0, sizeof packet);
       return 1;

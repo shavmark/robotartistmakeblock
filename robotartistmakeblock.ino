@@ -40,10 +40,11 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
  *    18. void MeStepper::enableOutputs();
  */
 
-  enum Command : uint8_t{NoCommand, SignOn, SetPin, MoveTo, Move, Run, RunSpeed, SetMaxSpeed, SetAcceleration, SetSpeed, SetCurrentPosition, RunToPosition, RunSpeedToPosition, DisableOutputs, EnableOutputs, GetDistanceToGo, GetTargetPositon, GetCurrentPosition,  Crash, Echo  } ;
+  enum Command : uint8_t{NoCommand, SignOn, SetPin, MoveTo, Move, Run, RunSpeed, SetMaxSpeed, SetAcceleration, SetSpeed, SetCurrentPosition, RunToPosition, RunSpeedToPosition, DisableOutputs, EnableOutputs, GetDistanceToGo, GetTargetPositon, GetCurrentPosition,  Crash  } ;
   enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
   void BinaryPacket(Command, uint8_t data1, uint8_t data2);
   void AsciiPacket(Command, long data);
+  void AsciiPacket(Command, long data1, long data2);
   void AsciiPacket(Command, float data);
   void cmdHeader(Command cmd);
   void buzz(int count);
@@ -57,25 +58,24 @@ class serialData {
     
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
-   * byte 1 stepper index (0 or 1)
+   * byte 1 stepper index (0 == X or 1 == Y)
    * byte 2 cmd for stepper 
    * other data read by command itself
    */
-   uint8_t getStepperId(){return packet[1];}
-   uint8_t getCommand() {return packet[2];}
-   MeStepper& getStepper();
    
   private:
   
-    void exec();
-    // internal variables used for reading messages
-    uint8_t packet[3];  // temporary values, moved after we confirm checksum
+   uint8_t getStepperId(){return packet[1];}
+   uint8_t getCommand() {return packet[2];}
+   void exec();
+   MeStepper& getStepper();
+   uint8_t packet[3]; 
 };
 
 serialData data;
 
-MeStepper stepper1(PORT_1); // would like to make these members of xyRobot but their constructors make it difficult
-MeStepper stepper2(PORT_2); 
+MeStepper stepperX(PORT_1); // would like to make these members of xyRobot but their constructors make it difficult
+MeStepper stepperY(PORT_2); 
 
 void serialData::exec(){
 
@@ -109,9 +109,9 @@ void serialData::exec(){
 MeStepper& serialData::getStepper(){
   switch(getStepperId()){
     case 0:
-    return stepper1;
+    return stepperX;
     case 1:
-    return stepper2;
+    return stepperY;
   }
 }
 
@@ -142,6 +142,10 @@ void AsciiPacket(Command cmd, long data)  {
   cmdHeader(cmd);
   Serial.println(data);
 }
+void AsciiPacket(Command cmd, long data1, long data2)  {
+  AsciiPacket(cmd, data1);
+  Serial.println(data2);
+}
 void AsciiPacket(Command cmd, float data)  {
   cmdHeader(cmd);
   Serial.println(data);
@@ -149,8 +153,11 @@ void AsciiPacket(Command cmd, float data)  {
 
 void signon(){
   BinaryPacket(SignOn, MAKERBOT_ID, IKM_MAKERBOTXY);
+   // send the x, y max info first, assuming the remaining data is comptable with other cards
+  Serial.println(3000); // max x
+  Serial.println(5000); // max y
   Serial.println("Makeblock flatbed");
-  Serial.println("bob");
+  Serial.println("bob"); // name
 }
 
 void setup(){  
@@ -162,24 +169,23 @@ void loop(){
   
   data.read();
  
-  stepper1.runToPosition();
-  stepper2.runToPosition();
+  stepperX.runToPosition();
+  stepperY.runToPosition();
 }
 
 void begin(int baud){
   
   Serial.begin(baud);
-  Serial.setTimeout(25*1000);
+  Serial.setTimeout(1*1000);
   while (!Serial) {
      ; // wait for serial port to connect. Needed for native USB
   }
   
   // Change these to suit your stepper if you want, but set some reasonable defaults now
-  stepper1.setMaxSpeed(1000.0f);
-  stepper1.setAcceleration(20000);
-  stepper2.setMaxSpeed(1000.0f);
-  stepper2.setAcceleration(20000);
-
+  stepperX.setMaxSpeed(1000.0f);
+  stepperX.setAcceleration(20000);
+  stepperY.setMaxSpeed(1000.0f);
+  stepperY.setAcceleration(20000);
 }
 
 

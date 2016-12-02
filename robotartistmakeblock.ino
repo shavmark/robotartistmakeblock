@@ -40,7 +40,7 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
  *    18. void MeStepper::enableOutputs();
  */
 
-  enum Command : uint8_t{NoCommand, SignOn, SetPin, MoveTo, Move, Run, RunSpeed, SetMaxSpeed, SetAcceleration, SetSpeed, SetCurrentPosition, RunToPosition, RunSpeedToPosition, DisableOutputs, EnableOutputs, GetDistanceToGo, GetTargetPositon, GetCurrentPosition,  Crash  } ;
+  enum Command : uint8_t{NoCommand, SignOn, SetPin, MoveTo, Move, Run, RunSpeed, SetMaxSpeed, SetAcceleration, SetSpeed, SetCurrentPosition, RunToPosition, RunSpeedToPosition, DisableOutputs, EnableOutputs, GetState, Crash  } ;
   enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
   void BinaryPacket(Command, uint8_t data1, uint8_t data2);
   void AsciiPacket(Command, long data);
@@ -55,7 +55,7 @@ class serialData {
   public:
     
     int read();         // must be called regularly to clean out Serial buffer
-    
+    void AsciiSendState();
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
    * byte 1 stepper index (0 == X or 1 == Y)
@@ -77,13 +77,25 @@ serialData data;
 MeStepper stepperX(PORT_1); // would like to make these members of xyRobot but their constructors make it difficult
 MeStepper stepperY(PORT_2); 
 
+//bugbug should we cook up some json? maybe for 2.0?
+void serialData::AsciiSendState(){
+  cmdHeader(GetState);
+  Serial.println(3800); // max x
+  Serial.println(3000); // max y
+  Serial.println(getStepper().currentPosition()); 
+  Serial.println(getStepper().targetPosition()); 
+  Serial.println(getStepper().distanceToGo()); 
+  Serial.println(getStepper().speed()); 
+
+}
+
 void serialData::exec(){
 
   if (getCommand() == SignOn){
       signon();
       return;
   }
-  
+  buzz(4);
   switch(getCommand()){
    case Move:
       getStepper().move(Serial.parseInt());
@@ -97,8 +109,9 @@ void serialData::exec(){
     case SetSpeed:
       getStepper().setSpeed(Serial.parseFloat());
       break;
-    case GetCurrentPosition:
-      return AsciiPacket(GetCurrentPosition, getStepper().currentPosition());
+    case GetState:
+      AsciiSendState();
+      return;
    }
 
    cmdHeader(getCommand()); // let people know we made it this far
@@ -154,8 +167,6 @@ void AsciiPacket(Command cmd, float data)  {
 void signon(){
   BinaryPacket(SignOn, MAKERBOT_ID, IKM_MAKERBOTXY);
    // send the x, y max info first, assuming the remaining data is comptable with other cards
-  Serial.println(3000); // max x
-  Serial.println(5000); // max y
   Serial.println("Makeblock flatbed");
   Serial.println("bob"); // name
 }

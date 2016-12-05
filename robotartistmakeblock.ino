@@ -86,7 +86,6 @@ void serialData::AsciiSendState(){
   Serial.println(getStepper().targetPosition()); 
   Serial.println(getStepper().distanceToGo()); 
   Serial.println(getStepper().speed()); 
-
 }
 
 void serialData::exec(){
@@ -95,7 +94,7 @@ void serialData::exec(){
       signon();
       return;
   }
-  buzz(4);
+ 
   switch(getCommand()){
    case Move:
       getStepper().move(Serial.parseInt());
@@ -114,7 +113,7 @@ void serialData::exec(){
       return;
    }
 
-   cmdHeader(getCommand()); // let people know we made it this far
+    // too noisy cmdHeader(getCommand()); // let people know we made it this far
 
 }
 

@@ -113,7 +113,6 @@ void serialData::exec(){
       return;
    }
 
-    // too noisy cmdHeader(getCommand()); // let people know we made it this far
 
 }
 
@@ -196,6 +195,9 @@ void begin(int baud){
   stepperX.setAcceleration(20000);
   stepperY.setMaxSpeed(1000.0f);
   stepperY.setAcceleration(20000);
+  stepperX.moveTo(0);
+  stepperY.moveTo(0);
+
 }
 
 

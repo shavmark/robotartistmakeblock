@@ -195,7 +195,7 @@ void begin(int baud){
   stepperX.setAcceleration(20000);
   stepperY.setMaxSpeed(1000.0f);
   stepperY.setAcceleration(20000);
-  stepperX.moveTo(0);
+  stepperX.moveTo(0);// start at 0,0
   stepperY.moveTo(0);
 
 }

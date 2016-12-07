@@ -31,21 +31,43 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
 
     void draw();
     void setup(int port);
- 
+    void update();
+    void endDraw();
+    void move(long steps, int wait);
+    
     long steps=0;
-    int delaytime=800;//bugbug make api to set this
+    int delaytime=800;//bugbug make api to set this? or is it just a basic setting
+    
  };
-void Port::draw() {
+  void Port::endDraw(){
+    Serial.write(0xee);
+    Serial.write(Move);
+    Serial.println(_port);
+    Serial.println(steps);
+  }
+ void Port::update(){
+  steps = Serial.parseInt(); // data for stepper x or y
+
   if (steps != 0){
     digitalWrite(s1,steps < 0);
-    int puresteps = abs(steps); // sign accounted for in direction
     delay(50);
-    for(int i=0;i<puresteps;i++) {
+  }
+ }
+ // move x steps 
+ void Port::move(long increment, int wait) {
+    for(long i=0; i < increment; i++) {
       digitalWrite(s2, HIGH);
-      delayMicroseconds(delaytime);
+      delayMicroseconds(wait);
       digitalWrite(s2, LOW);
-      delayMicroseconds(delaytime); 
+      delayMicroseconds(wait); 
     }
+ }
+ 
+ // move entire way
+void Port::draw() {
+  if (steps != 0){
+    update();
+    move(abs(steps),delaytime); 
   }
 }
 void Port::setup(int port){
@@ -71,35 +93,68 @@ class Machine {
   private:
     void buzz(int count);
     void signon();
-    void exec(int port, uint8_t cmd);
+    void exec();
     uint8_t packet[3]; 
 };
 
 Machine machine;
 
-void Machine::exec(int port, uint8_t cmd){
-  int saveSteps, delaytime;
-  switch(cmd){
-   case SignOn:
+void Machine::exec(){
+
+  // sign on has no data and is set via either motor, in the future maybe each motor gets a sign on? not sure
+  if (packet[1] == SignOn || packet[2] == SignOn){
       signon();
       return;
-   case Move:
-      ports[port].steps = Serial.parseInt(); // data for stepper
-      if (ports[port].steps > 0){
-        ports[port].draw();
-      }
-      Serial.write(0xee);
-      Serial.write(Move);
-      Serial.println(port);
-      Serial.println(ports[port].steps);
-      break;
-    case GetState:
+  }
+
+  // GetState is foreither motor, in the future maybe each motor gets GetState? not sure
+  if (packet[1] == GetState || packet[2] == GetState){
       Serial.write(0xee);
       Serial.write(GetState); 
       Serial.println((long)4*4000+1000); // max x
       Serial.println((long)8*5000); // max y bugbug validate this
       return;
+  }
+
+  // echo back error
+   if (packet[1] != Move && packet[2] != Move){
+      buzz(5);
+      Serial.write(0xee);
+      Serial.write(NoCommand); 
+      Serial.println(packet[1]);
+      Serial.println(packet[2]);
+      return;
    }
+   
+    ports[0].update();
+    ports[1].update();
+    
+    // move both at once, start by moving the amount of the longest run then only move the motor with remaining data
+    long count = max(ports[0].steps, ports[1].steps);
+    int wait;
+    for (long i = 1; i <= count; i+=1){ // bugbug see if +5 works too?
+       if (i <= ports[0].steps){
+        wait = (i <= ports[1].steps) ? ports[0].delaytime*2 : ports[0].delaytime;
+        ports[0].move(i, wait);
+       }
+       if (i <= ports[1].steps){
+        wait = (i <= ports[0].steps) ? ports[1].delaytime*2 : ports[1].delaytime;
+        ports[1].move(i, wait);
+       }
+
+       if (count < 5){
+        delay(500); // start slow to ramp up
+       }
+       
+    }
+
+    if (ports[0].steps > 0){
+      ports[0].endDraw();
+    }
+
+    if (ports[1].steps > 0){
+      ports[1].endDraw();
+    }
 }
 
 void Machine::buzz(int count){
@@ -151,8 +206,7 @@ int Machine::update(){
    if (Serial.available()) {
       if (Serial.readBytes(packet, sizeof packet) == sizeof packet){
         if (packet[0] == 0xee){
-          exec(0, packet[1]);
-          exec(1, packet[2]);
+          exec();
           memset(packet, 0, sizeof packet);
           return 1;
         }

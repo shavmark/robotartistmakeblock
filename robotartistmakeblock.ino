@@ -32,7 +32,7 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
     void draw();
     void setup(int port);
  
-    int steps=0;
+    long steps=0;
     int delaytime=800;//bugbug make api to set this
  };
 void Port::draw() {
@@ -60,47 +60,44 @@ class Machine {
   public:
     void setup(int baud);
     int update();         // must be called regularly to clean out Serial buffer
+    Port ports[2]; // X and Y ports
     
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
-   * byte 1 stepper index (0 == X or 1 == Y)
-   * byte 2 cmd for stepper 
+   * byte 1 cmd for stepper X (can be NoCommand)
+   * byte 2 cmd for stepper Y (can be NoCommand) 
    * other data read by command itself
    */
   private:
-    Port ports[2]; // X and Y ports
     void buzz(int count);
     void signon();
-    // simple wrapper to get correct stepper, enum helps assure range is ok
-    Port& getStepper(){ return ports[getStepperId()];}
-    uint8_t getStepperId(){return packet[1];}
-    uint8_t getCommand() {return packet[2];}
-    void exec();
+    void exec(int port, uint8_t cmd);
     uint8_t packet[3]; 
 };
 
 Machine machine;
 
-void Machine::exec(){
+void Machine::exec(int port, uint8_t cmd){
   int saveSteps, delaytime;
-  switch(getCommand()){
+  switch(cmd){
    case SignOn:
       signon();
       return;
    case Move:
-      getStepper().steps = Serial.parseInt();
-      if (getStepper().steps > 0){
-        getStepper().draw();
+      ports[port].steps = Serial.parseInt(); // data for stepper
+      if (ports[port].steps > 0){
+        ports[port].draw();
       }
       Serial.write(0xee);
       Serial.write(Move);
-      Serial.println(getStepper().steps);
+      Serial.println(port);
+      Serial.println(ports[port].steps);
       break;
     case GetState:
       Serial.write(0xee);
       Serial.write(GetState); 
-      Serial.println(4*4000+1000); // max x
-      Serial.println(8*4000+500); // max y
+      Serial.println((long)4*4000+1000); // max x
+      Serial.println((long)8*5000); // max y bugbug validate this
       return;
    }
 }
@@ -154,7 +151,8 @@ int Machine::update(){
    if (Serial.available()) {
       if (Serial.readBytes(packet, sizeof packet) == sizeof packet){
         if (packet[0] == 0xee){
-          exec();
+          exec(0, packet[1]);
+          exec(1, packet[2]);
           memset(packet, 0, sizeof packet);
           return 1;
         }

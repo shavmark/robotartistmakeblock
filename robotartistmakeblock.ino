@@ -60,7 +60,6 @@ class Machine {
   public:
     void setup(int baud);
     int update();         // must be called regularly to clean out Serial buffer
-    Port ports[2]; // X and Y ports
     
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
@@ -69,6 +68,7 @@ class Machine {
    * other data read by command itself
    */
   private:
+    Port ports[2]; // X and Y ports
     void buzz(int count);
     void signon();
     // simple wrapper to get correct stepper, enum helps assure range is ok

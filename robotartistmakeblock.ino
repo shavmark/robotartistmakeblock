@@ -19,29 +19,51 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
 #include "MeOrion.h"
 #include <SoftwareSerial.h>
 
+const long xMax = (long)4*4000+1000;
+const long yMax = (long)8*4000+1300;// max y bugbug validate this
 
-  enum Command : uint8_t{NoCommand, SignOn, GetState, xyMove, PolyLineBasic, PolyLineFancy, xyEllipse, xyCircle, xyLine, xyBezier  } ;
-  enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
+enum Command : uint8_t{NoCommand, SignOn, xyMove, PolyLineBasic, PolyLineFancy, xyEllipse, xyCircle, xyLine, xyBezier  } ;
+enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
+  void buzz(int count);
 
-  class Port : public MePort{
+long getX(){
+  float x = Serial.parseFloat();
+  if (x <= 1.0 && x >= 0.0){
+    return x*xMax;
+  }
+  buzz(2);
+  return 0;
+}
+long getY(){
+  float y = Serial.parseFloat();
+  if (y <= 1.0 && y >= 0.0){
+    return y*yMax;
+  }
+  buzz(3);
+  return 0;
+}
+
+class Port : public MePort{
   public:
 
     void setup(int port);
     void move();
     long steps=0;
-    void setWaitLong(bool b = true) {
-      if (b){
-        delaytime=1600;
-      }
-      else {
-        delaytime=800;
-      }
-    }
+    void setWaitLong(bool b = true);
   
     int direction; // undefined to start
     int delaytime;//bugbug make api to set this? or is it just a basic setting
  };
- // move x steps (does not use local variable steps
+
+ void Port::setWaitLong(bool b = true) {
+  if (b){
+    delaytime=1600;
+  }
+  else {
+    delaytime=800;
+  }
+}
+// move x steps (does not use local variable steps
  void Port::move() {
   if (steps == 0){
     return;
@@ -83,7 +105,6 @@ class Machine {
     void polylineBasic(int count);
     void bezier(long x1, long y1, long x2, long y2, long x3, long y3);
     void draw(long x, long y);
-    void buzz(int count);
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
    * byte 1 cmd 
@@ -93,51 +114,43 @@ class Machine {
     void endDraw(uint8_t cmd);
     void signon();
     void exec();
-    uint8_t packet[3]; 
+    uint8_t packet[2]; 
 };
  // mainly for debug bugbug remove in production?
   void Machine::endDraw(uint8_t cmd){
     Serial.write(0xee);
     Serial.write(cmd);
     Serial.println(ports[0].getPort());
-    Serial.println(ports[0].steps);
     Serial.println(ports[0].direction);
     Serial.println(ports[1].getPort());
-    Serial.println(ports[1].steps);
     Serial.println(ports[1].direction);
   }
 
  void Machine::draw(long x, long y){
-    ports[0].steps = x;
-    ports[1].steps = y;
-    long count = max(ports[0].steps, ports[1].steps);
-    
-    for (long i = 1; i <= count; i+=1){ // bugbug see if +5 works too?
-       if (i <= ports[0].steps){
-        ports[0].setWaitLong(i <= ports[1].steps); // move slower if x,y as things need to settle to avoid shaking
+    long count = max(x,y);
+    ports[0].steps = 1; // one step at a time
+    ports[1].steps = 2; // not sure why but y is 2x (give or take)
+    for (long i = 1; i <= count; ++i){ 
+       if (i <= x){
+        ports[0].setWaitLong(i <= abs(y)); // move slower if x,y as things need to settle to avoid shaking
         ports[0].move();
        }
-       if (i <= ports[1].steps){
-        ports[1].setWaitLong(i <= ports[0].steps); 
+       if (i <= y){
+        ports[1].setWaitLong(i <= abs(x)); 
         ports[1].move();
        }
-
-       if (count > 1 && count < 5){
-        delay(500); // start slow to ramp up
-       }
     }
-  
  }
 // read count line points from serial
 void Machine::polylineBasic(int count){
   for (int i = 0; i < count; ++i){
-    draw(Serial.parseInt(), Serial.parseInt());
+    draw(getX(), getY());
   }
   endDraw(PolyLineBasic);
 }
 void Machine::polylineFancy(int count){
   for (int i = 0; i < count; ++i){
-    line(Serial.parseInt(), Serial.parseInt());
+    line(getX(), getY());
   }
   endDraw(PolyLineFancy);
 }
@@ -175,7 +188,7 @@ void Machine::line(long x1, long y1) {
   long dx = abs(x1-x0), sx = x0<x1 ? 1 : -1;
   long dy = abs(y1-y0), sy = y0<y1 ? 1 : -1; 
   long err = (dx>dy ? dx : -dy)/2, e2;
- 
+
   for(;;){
     draw(x0, y0);
     if (x0==x1 && y0==y1) break;
@@ -211,68 +224,55 @@ Machine machine;
 
 void Machine::exec(){
 
-  if (packet[1] == NoCommand){
-      return;
-  }
-
   // sign on has no data and is set via either motor, in the future maybe each motor gets a sign on? not sure
   if (packet[1] == SignOn){
       signon();
       return;
   }
 
-  // GetState is foreither motor, in the future maybe each motor gets GetState? not sure
-  if (packet[1] == GetState){
-      Serial.write(0xee);
-      Serial.write(GetState); 
-      Serial.println((long)4*4000+1000); // max x
-      Serial.println((long)8*5000); // max y bugbug validate this
-      return;
-  }
-
   if (packet[1] == PolyLineBasic){
-    polylineBasic(Serial.parseInt());
+    polylineBasic(getX());
     return;
   }
 
   if (packet[1] == PolyLineFancy){
-    polylineFancy(Serial.parseInt());
+    polylineFancy(getX());
     return;
   }
 
   if (packet[1] == xyEllipse){
-    ellipse(Serial.parseInt(), Serial.parseInt());
+    ellipse(getX(), getY());
     return;
   }
   
   if (packet[1] == xyCircle){
-    circle(Serial.parseInt());
+    circle(getX());
     return;
   }
 
   if (packet[1] == xyLine){
-    line(Serial.parseInt(), Serial.parseInt());
+    buzz(1);
+    line(getX(), getY());
     return;
   }
 
   if (packet[1] == xyMove){
-    move(Serial.parseInt(), Serial.parseInt());
+    move(getX(), getY());
     return;
   }
 
-
   if (packet[1] == xyBezier){
-    bezier(Serial.parseInt(), Serial.parseInt(), Serial.parseInt(), Serial.parseInt(),Serial.parseInt(), Serial.parseInt());
+    bezier(getX(), getY(), getX(), getY(), getX(), getY());
     return;
   }
 
 }
 
-void Machine::buzz(int count){
+void buzz(int count){
   if (count > 0){
     for (int i = 0; i < count; ++i){
       buzzerOn();
-      delay(i+1*1000);
+      delay(i+1*500);
       buzzerOff();
     }
   }
@@ -291,7 +291,7 @@ void Machine::signon(){
 void setup(){  
   
   machine.setup(19200);
-
+  machine.move(xMax,yMax);
 }
 
 void loop(){

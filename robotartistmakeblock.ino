@@ -20,58 +20,49 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
 #include <SoftwareSerial.h>
 
 
-  enum Command : uint8_t{NoCommand, SignOn, Move, GetState  } ;
+  enum Command : uint8_t{NoCommand, SignOn, GetState, xyMove, PolyLineBasic, PolyLineFancy, xyEllipse, xyCircle, xyLine, xyBezier  } ;
   enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
 
   class Port : public MePort{
   public:
 
-    void draw();
     void setup(int port);
-    void update();
-    void endDraw();
-    void move(long steps, int wait);
+    void move();
     long steps=0;
-    int delaytime=800;//bugbug make api to set this? or is it just a basic setting
-    
+    void setWaitLong(bool b = true) {
+      if (b){
+        delaytime=1600;
+      }
+      else {
+        delaytime=800;
+      }
+    }
+  
+    int direction; // undefined to start
+    int delaytime;//bugbug make api to set this? or is it just a basic setting
  };
-  void Port::endDraw(){
-    Serial.write(0xee);
-    Serial.write(Move);
-    Serial.println(_port);
-    Serial.println(steps);
+ // move x steps (does not use local variable steps
+ void Port::move() {
+  if (steps == 0){
+    return;
   }
- void Port::update(){
-  steps = Serial.parseInt(); // data for stepper x or y
-
-  if (steps != 0){
-    digitalWrite(s1,steps < 0);
+  if ((steps < 0) != direction){
+    direction = steps < 0;
+    digitalWrite(s1, direction);
     delay(50);
   }
- }
- // move x steps
- void Port::move(long increment, int wait) {
-    if (increment != 0){
-      digitalWrite(s1, increment < 0);
-      delay(50);
-    }
 
-    for(long i=0; i < abs(increment); i++) {
-      digitalWrite(s2, HIGH);
-      delayMicroseconds(wait);
-      digitalWrite(s2, LOW);
-      delayMicroseconds(wait); 
-    }
+  for(long i=0; i < abs(steps); i++) {
+    digitalWrite(s2, HIGH);
+    delayMicroseconds(delaytime);
+    digitalWrite(s2, LOW);
+    delayMicroseconds(delaytime); 
+  }
  }
  
- // move entire way
-void Port::draw() {
-  if (steps != 0){
-    update();
-    move(abs(steps),delaytime); 
-  }
-}
 void Port::setup(int port){
+    setWaitLong(false);
+    direction = -1;
     _port = port;
     s1 = mePort[_port].s1;
     s2 = mePort[_port].s2;
@@ -82,44 +73,56 @@ void Port::setup(int port){
 class Machine {    
   public:
     void setup(int baud);
-    int update();         // must be called regularly to clean out Serial buffer
+    int update();
     Port ports[2]; // X and Y ports
-    void line(long x1, long y1);
+    void line(long x, long y);
+    void move(long x, long y); // direct move, no fancy line work
     void circle(long r);
     void ellipse(long width, long height);
     void polylineFancy(int count);
     void polylineBasic(int count);
     void bezier(long x1, long y1, long x2, long y2, long x3, long y3);
     void draw(long x, long y);
-
+    void buzz(int count);
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
-   * byte 1 cmd for stepper X (can be NoCommand)
-   * byte 2 cmd for stepper Y (can be NoCommand) 
+   * byte 1 cmd 
    * other data read by command itself
    */
   private:
-    void buzz(int count);
+    void endDraw(uint8_t cmd);
     void signon();
     void exec();
     uint8_t packet[3]; 
 };
+ // mainly for debug bugbug remove in production?
+  void Machine::endDraw(uint8_t cmd){
+    Serial.write(0xee);
+    Serial.write(cmd);
+    Serial.println(ports[0].getPort());
+    Serial.println(ports[0].steps);
+    Serial.println(ports[0].direction);
+    Serial.println(ports[1].getPort());
+    Serial.println(ports[1].steps);
+    Serial.println(ports[1].direction);
+  }
+
  void Machine::draw(long x, long y){
     ports[0].steps = x;
     ports[1].steps = y;
     long count = max(ports[0].steps, ports[1].steps);
-    int wait;
+    
     for (long i = 1; i <= count; i+=1){ // bugbug see if +5 works too?
        if (i <= ports[0].steps){
-        wait = (i <= ports[1].steps) ? ports[0].delaytime*2 : ports[0].delaytime;
-        ports[0].move(i, wait);
+        ports[0].setWaitLong(i <= ports[1].steps); // move slower if x,y as things need to settle to avoid shaking
+        ports[0].move();
        }
        if (i <= ports[1].steps){
-        wait = (i <= ports[0].steps) ? ports[1].delaytime*2 : ports[1].delaytime;
-        ports[1].move(i, wait);
+        ports[1].setWaitLong(i <= ports[0].steps); 
+        ports[1].move();
        }
 
-       if (count < 5){
+       if (count > 1 && count < 5){
         delay(500); // start slow to ramp up
        }
     }
@@ -128,29 +131,26 @@ class Machine {
 // read count line points from serial
 void Machine::polylineBasic(int count){
   for (int i = 0; i < count; ++i){
-    long x = Serial.parseInt(); 
-    long y = Serial.parseInt(); 
-    ports[0].move(x, ports[0].delaytime*2);
-    ports[1].move(y, ports[1].delaytime*2);
+    draw(Serial.parseInt(), Serial.parseInt());
   }
+  endDraw(PolyLineBasic);
 }
 void Machine::polylineFancy(int count){
   for (int i = 0; i < count; ++i){
-    long x = Serial.parseInt(); 
-    long y = Serial.parseInt(); 
-    line(x,y);
+    line(Serial.parseInt(), Serial.parseInt());
   }
+  endDraw(PolyLineFancy);
 }
 void Machine::ellipse(long width, long height) {
 
   for (long y = -height; y <= height; y++) {
     for (long x = -width; x <= width; x++) {
       if (x*x*height*height + y*y*width*width <= height*height*width*width) {
-        ports[0].move(x, ports[0].delaytime*2);
-        ports[1].move(y, ports[1].delaytime*2);
+         draw(x, y);
       }
     }
   }
+  endDraw(xyEllipse);
 }
 void Machine::circle(long r) {
   float slice = 2 * M_PI / 10;
@@ -158,10 +158,16 @@ void Machine::circle(long r) {
     float angle = slice * i;
     long x = r * cos(angle);
     long y = r * sin(angle);
-    ports[0].move(x, ports[0].delaytime*2);
-    ports[1].move(y, ports[1].delaytime*2);
+    draw(x, y);
   }
+  endDraw(xyCircle);
 }
+// direct move, no fancy line work
+void Machine::move(long x, long y){
+   draw(x, y);
+   endDraw(xyMove);
+}
+
 // fancy line to a point from current point
 void Machine::line(long x1, long y1) {
   long x0=0, y0=0;
@@ -171,13 +177,13 @@ void Machine::line(long x1, long y1) {
   long err = (dx>dy ? dx : -dy)/2, e2;
  
   for(;;){
-    ports[0].move(x0, ports[0].delaytime*2);
-    ports[1].move(y0, ports[1].delaytime*2);
+    draw(x0, y0);
     if (x0==x1 && y0==y1) break;
     e2 = err;
     if (e2 >-dx) { err -= dy; x0 += sx; }
     if (e2 < dy) { err += dx; y0 += sy; }
   }
+  endDraw(xyLine);
 }
 
 long getPt( long n1 , long n2 , float perc ){
@@ -197,23 +203,26 @@ void Machine::bezier(long x1, long y1, long x2, long y2, long x3, long y3){
       // The Black Dot
       long x = getPt( xa , xb , i );
       long y = getPt( ya , yb , i );
-  
-      ports[0].move(x, ports[0].delaytime*2);
-      ports[1].move(y, ports[1].delaytime*2);
+      draw(x, y);
   } 
+  endDraw(xyBezier);
 }
 Machine machine;
 
 void Machine::exec(){
 
+  if (packet[1] == NoCommand){
+      return;
+  }
+
   // sign on has no data and is set via either motor, in the future maybe each motor gets a sign on? not sure
-  if (packet[1] == SignOn || packet[2] == SignOn){
+  if (packet[1] == SignOn){
       signon();
       return;
   }
 
   // GetState is foreither motor, in the future maybe each motor gets GetState? not sure
-  if (packet[1] == GetState || packet[2] == GetState){
+  if (packet[1] == GetState){
       Serial.write(0xee);
       Serial.write(GetState); 
       Serial.println((long)4*4000+1000); // max x
@@ -221,24 +230,42 @@ void Machine::exec(){
       return;
   }
 
-  // echo back error
-   if (packet[1] != Move && packet[2] != Move){
-      Serial.write(0xee);
-      Serial.write(NoCommand); 
-      Serial.println(packet[1]);
-      Serial.println(packet[2]);
-      return;
-   }
+  if (packet[1] == PolyLineBasic){
+    polylineBasic(Serial.parseInt());
+    return;
+  }
 
-   draw(Serial.parseInt(), Serial.parseInt());
+  if (packet[1] == PolyLineFancy){
+    polylineFancy(Serial.parseInt());
+    return;
+  }
 
-    if (ports[0].steps > 0){
-      ports[0].endDraw();
-    }
+  if (packet[1] == xyEllipse){
+    ellipse(Serial.parseInt(), Serial.parseInt());
+    return;
+  }
+  
+  if (packet[1] == xyCircle){
+    circle(Serial.parseInt());
+    return;
+  }
 
-    if (ports[1].steps > 0){
-      ports[1].endDraw();
-    }
+  if (packet[1] == xyLine){
+    line(Serial.parseInt(), Serial.parseInt());
+    return;
+  }
+
+  if (packet[1] == xyMove){
+    move(Serial.parseInt(), Serial.parseInt());
+    return;
+  }
+
+
+  if (packet[1] == xyBezier){
+    bezier(Serial.parseInt(), Serial.parseInt(), Serial.parseInt(), Serial.parseInt(),Serial.parseInt(), Serial.parseInt());
+    return;
+  }
+
 }
 
 void Machine::buzz(int count){

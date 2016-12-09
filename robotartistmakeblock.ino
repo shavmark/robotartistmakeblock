@@ -53,6 +53,8 @@ class Port : public MePort{
   
     int direction; // undefined to start
     int delaytime;//bugbug make api to set this? or is it just a basic setting
+    private:
+    int lastDirection=-1;
  };
 
  void Port::setWaitLong(bool b = true) {
@@ -68,8 +70,8 @@ class Port : public MePort{
   if (steps == 0){
     return;
   }
-  if ((steps < 0) != direction){
-    direction = steps < 0;
+  if (lastDirection != direction){
+    lastDirection = direction;
     digitalWrite(s1, direction);
     delay(50);
   }
@@ -127,16 +129,23 @@ class Machine {
   }
 
  void Machine::draw(long x, long y){
-    long count = max(x,y);
+  if (x > xMax || y > yMax){
+    return;
+  }
+    ports[0].direction =  x < 0;
+    ports[1].direction =  y < 0;
+    x = abs(x);
+    y = abs(y);
+    long count = max(x,y/2);
     ports[0].steps = 1; // one step at a time
     ports[1].steps = 2; // not sure why but y is 2x (give or take)
     for (long i = 1; i <= count; ++i){ 
        if (i <= x){
-        ports[0].setWaitLong(i <= abs(y)); // move slower if x,y as things need to settle to avoid shaking
+        ports[0].setWaitLong(i <= y); // move slower if x,y as things need to settle to avoid shaking
         ports[0].move();
        }
        if (i <= y){
-        ports[1].setWaitLong(i <= abs(x)); 
+        ports[1].setWaitLong(i <= x); 
         ports[1].move();
        }
     }
@@ -291,7 +300,6 @@ void Machine::signon(){
 void setup(){  
   
   machine.setup(19200);
-  machine.move(xMax,yMax);
 }
 
 void loop(){

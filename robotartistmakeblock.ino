@@ -22,25 +22,17 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
 const long xMax = (long)4*4000+1000;
 const long yMax = (long)8*4000+1300;// max y bugbug validate this
 
-enum Command : uint8_t{NoCommand, SignOn, xyMove, PolyLineBasic, PolyLineFancy, xyEllipse, xyCircle, xyLine, xyBezier  } ;
+enum Command : uint8_t{NoCommand, SignOn, xyMove, PolyLineStream, PolyLineFancy, xyEllipse, xyCircle, xyLine, xyBezier, Trace  } ;
 enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
   void buzz(int count);
 
 long getX(){
-  float x = Serial.parseFloat();
-  if (x <= 1.0 && x >= 0.0){
-    return x*xMax;
-  }
-  buzz(2);
-  return 0;
+  float f = (float)Serial.parseInt()/100;
+  return (long)(f*xMax);
 }
 long getY(){
-  float y = Serial.parseFloat();
-  if (y <= 1.0 && y >= 0.0){
-    return y*yMax;
-  }
-  buzz(3);
-  return 0;
+   float f = (float)Serial.parseInt()/100;
+  return (long)(f*yMax);
 }
 
 class Port : public MePort{
@@ -50,7 +42,6 @@ class Port : public MePort{
     void move();
     long steps=0;
     void setWaitLong(bool b = true);
-  
     int direction; // undefined to start
     int delaytime;//bugbug make api to set this? or is it just a basic setting
     private:
@@ -104,9 +95,10 @@ class Machine {
     void circle(long r);
     void ellipse(long width, long height);
     void polylineFancy(int count);
-    void polylineBasic(int count);
+    void polylineStream(long count);
     void bezier(long x1, long y1, long x2, long y2, long x3, long y3);
     void draw(long x, long y);
+    void trace(long count, long index, long x, long y);
   /* input data, byte 0 is not saved in packet
    * byte 0 - 0xee (not saved in packet)
    * byte 1 cmd 
@@ -117,11 +109,25 @@ class Machine {
     void signon();
     void exec();
     uint8_t packet[2]; 
+    void setHeader(uint8_t cmd);
+    const int defaultSerialTimeout = 2000;
 };
+// send in binary, always the same size
+void Machine::setHeader(uint8_t cmd){
+   Serial.write(0xee);
+   Serial.write(cmd);
+}
+void Machine::trace(long count, long index, long x, long y){
+  setHeader(Trace);
+  Serial.println(count);
+  Serial.println(index);
+  Serial.println(x);
+  Serial.println(y);
+}
+
  // mainly for debug bugbug remove in production?
   void Machine::endDraw(uint8_t cmd){
-    Serial.write(0xee);
-    Serial.write(cmd);
+    setHeader(cmd);
     Serial.println(ports[0].getPort());
     Serial.println(ports[0].direction);
     Serial.println(ports[1].getPort());
@@ -129,33 +135,39 @@ class Machine {
   }
 
  void Machine::draw(long x, long y){
+  ports[0].direction =  x < 0;
+  ports[1].direction =  y < 0;
+  x = abs(x);
+  y = abs(y);
   if (x > xMax || y > yMax){
-    return;
+     buzz(5);
+    return; // fail safe
   }
-    ports[0].direction =  x < 0;
-    ports[1].direction =  y < 0;
-    x = abs(x);
-    y = abs(y);
-    long count = max(x,y/2);
-    ports[0].steps = 1; // one step at a time
-    ports[1].steps = 2; // not sure why but y is 2x (give or take)
-    for (long i = 1; i <= count; ++i){ 
-       if (i <= x){
-        ports[0].setWaitLong(i <= y); // move slower if x,y as things need to settle to avoid shaking
-        ports[0].move();
-       }
-       if (i <= y){
-        ports[1].setWaitLong(i <= x); 
-        ports[1].move();
-       }
-    }
- }
-// read count line points from serial
-void Machine::polylineBasic(int count){
-  for (int i = 0; i < count; ++i){
-    draw(getX(), getY());
+  long count = max(x,y/2);
+  ports[0].steps = 1; // one step 
+  ports[1].steps = 2; // not sure why but y is 2x (give or take)
+  for (long i = 1; i <= count; ++i){ 
+     if (i <= x){
+      ports[0].setWaitLong(i <= y); // move slower if x,y as things need to settle to avoid shaking
+      ports[0].move();
+     }
+     if (i <= y){
+      ports[1].setWaitLong(i <= x); 
+      ports[1].move();
+     }
   }
-  endDraw(PolyLineBasic);
+}
+// read count line points from serial, this streams data
+void Machine::polylineStream(long count){
+  //Serial.setTimeout(30*1000); // we know data is coming so ok to wait for it
+  for (long i = 0; i < count; ++i){
+    long x = getX();
+    long y = getY();
+    trace(count, i, x, y);
+    draw(x, y);
+  }
+  endDraw(PolyLineStream);
+  //Serial.setTimeout(defaultSerialTimeout);
 }
 void Machine::polylineFancy(int count){
   for (int i = 0; i < count; ++i){
@@ -174,14 +186,31 @@ void Machine::ellipse(long width, long height) {
   }
   endDraw(xyEllipse);
 }
+//http://www.mathopenref.com/coordcirclealgorithm.html
 void Machine::circle(long r) {
+  float slice = 2 * M_PI / 10;
+  long xs[10];
+  long ys[10];// points on a line
+  for (int i = 0; i < 10; i++) {
+    float theta = slice * i;
+    xs[i] = (long)(r*cos(theta));
+    ys[i] = (long)(r*sin(theta));
+    move(xs[i],ys[i]);   
+  }
+  // move to outer cicle (would not draw this one)
+    //trace(xyCircle, x,y);
+    //draw(x, y);
+
+  /*
   float slice = 2 * M_PI / 10;
   for (int i = 0; i < 10; i++) {
     float angle = slice * i;
     long x = r * cos(angle);
     long y = r * sin(angle);
-    draw(x, y);
+    trace(xyCircle, x,y);
+    //draw(x, y);
   }
+  */
   endDraw(xyCircle);
 }
 // direct move, no fancy line work
@@ -239,8 +268,8 @@ void Machine::exec(){
       return;
   }
 
-  if (packet[1] == PolyLineBasic){
-    polylineBasic(getX());
+  if (packet[1] == PolyLineStream){
+    polylineStream(Serial.parseInt());
     return;
   }
 
@@ -260,7 +289,7 @@ void Machine::exec(){
   }
 
   if (packet[1] == xyLine){
-    buzz(1);
+    //buzz(1);
     line(getX(), getY());
     return;
   }
@@ -314,7 +343,7 @@ void Machine::setup(int baud){
   ports[1].setup(PORT_2);
 
   Serial.begin(baud);
-  Serial.setTimeout(2000);
+  Serial.setTimeout(defaultSerialTimeout);
   while (!Serial) {
      ; // wait for serial port to connect. Needed for native USB
   }

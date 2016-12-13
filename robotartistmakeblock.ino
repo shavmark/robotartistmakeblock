@@ -24,15 +24,21 @@ const long yMax = (long)8*4000+1300;// max y bugbug validate this
 
 enum Command : uint8_t{NoCommand, SignOn, xyMove, PolyLineStream, PolyLineFancy, xyEllipse, xyCircle, xyLine, xyBezier, Trace  } ;
 enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
-  void buzz(int count);
+void buzz(int count);
 
-long getX(){
-  float f = (float)Serial.parseInt()/100;
-  return (long)(f*xMax);
+long readLong(){
+  long data = Serial.parseInt();
+  //Serial.read(); // ignore separator
+  return data;
 }
-long getY(){
-   float f = (float)Serial.parseInt()/100;
-  return (long)(f*yMax);
+// data always comes together
+void get(long&x, long&y){
+  float f = Serial.parseFloat();
+  x = (long)(f*xMax);
+  //Serial.read(); // ignore separator
+  f = Serial.parseFloat();
+  y = (long)(f*yMax);
+  //Serial.read(); // ignore separator
 }
 
 class Port : public MePort{
@@ -160,20 +166,17 @@ void Machine::trace(long count, long index, long x, long y){
 // read count line points from serial, this streams data
 void Machine::polylineStream(long count){
   //Serial.setTimeout(30*1000); // we know data is coming so ok to wait for it
+  long x,y;
   for (long i = 0; i < count; ++i){
-    long x = getX();
-    long y = getY();
-    trace(count, i, x, y);
+    get(x,y);
+    //trace(count, i, x, y);
+    //break;
     draw(x, y);
   }
   endDraw(PolyLineStream);
   //Serial.setTimeout(defaultSerialTimeout);
 }
 void Machine::polylineFancy(int count){
-  for (int i = 0; i < count; ++i){
-    line(getX(), getY());
-  }
-  endDraw(PolyLineFancy);
 }
 void Machine::ellipse(long width, long height) {
 
@@ -269,38 +272,51 @@ void Machine::exec(){
   }
 
   if (packet[1] == PolyLineStream){
-    polylineStream(Serial.parseInt());
+    polylineStream(readLong());
     return;
   }
 
   if (packet[1] == PolyLineFancy){
-    polylineFancy(getX());
+    long x, y;
+    get(x,y);
+    polylineFancy(x);
     return;
   }
 
   if (packet[1] == xyEllipse){
-    ellipse(getX(), getY());
+    long x, y;
+    get(x,y);
+    ellipse(x,y);
     return;
   }
   
   if (packet[1] == xyCircle){
-    circle(getX());
+    long x, y;
+    get(x,y);
+    circle(x);
     return;
   }
 
   if (packet[1] == xyLine){
-    //buzz(1);
-    line(getX(), getY());
+    long x, y;
+    get(x,y);
+    line(x,y);
     return;
   }
 
   if (packet[1] == xyMove){
-    move(getX(), getY());
+    long x, y;
+    get(x,y);
+    move(x,y);
     return;
   }
 
   if (packet[1] == xyBezier){
-    bezier(getX(), getY(), getX(), getY(), getX(), getY());
+    long x0, y0, x1, y1, x2, y2;
+    get(x0, y0);
+    get(x1, y1);
+    get(x2, y2);
+    bezier(x0, y0, x1, y1, x2, y2);
     return;
   }
 

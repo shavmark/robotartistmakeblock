@@ -22,23 +22,22 @@ along with myRobotSketch.If not, see <http://www.gnu.org/licenses/>.
 const long xMax = (long)4*4000+1000;
 const long yMax = (long)8*4000+1300;// max y bugbug validate this
 
-enum Command : uint8_t{NoCommand, SignOn, xyMove, PolyLineStream, PolyLineFancy, xyEllipse, xyCircle, xyLine, xyBezier, Trace  } ;
+enum Command : uint8_t{NoCommand, SignOn, xyPolyLine,Trace  } ;
 enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
 void buzz(int count);
 
 long readLong(){
   long data = Serial.parseInt();
-  //Serial.read(); // ignore separator
   return data;
 }
 // data always comes together
 void get(long&x, long&y){
+   while (!Serial.available()) {
+   }
   float f = Serial.parseFloat();
   x = (long)(f*xMax);
-  //Serial.read(); // ignore separator
   f = Serial.parseFloat();
   y = (long)(f*yMax);
-  //Serial.read(); // ignore separator
 }
 
 class Port : public MePort{
@@ -96,13 +95,7 @@ class Machine {
     void setup(int baud);
     int update();
     Port ports[2]; // X and Y ports
-    void line(long x, long y);
-    void move(long x, long y); // direct move, no fancy line work
-    void circle(long r);
-    void ellipse(long width, long height);
-    void polylineFancy(int count);
-    void polylineStream(long count);
-    void bezier(long x1, long y1, long x2, long y2, long x3, long y3);
+    void polyline();
     void draw(long x, long y);
     void trace(long count, long index, long x, long y);
   /* input data, byte 0 is not saved in packet
@@ -111,12 +104,11 @@ class Machine {
    * other data read by command itself
    */
   private:
-    void endDraw(uint8_t cmd);
     void signon();
     void exec();
     uint8_t packet[2]; 
     void setHeader(uint8_t cmd);
-    const int defaultSerialTimeout = 2000;
+    const int defaultSerialTimeout = 22000;
 };
 // send in binary, always the same size
 void Machine::setHeader(uint8_t cmd){
@@ -131,15 +123,6 @@ void Machine::trace(long count, long index, long x, long y){
   Serial.println(y);
 }
 
- // mainly for debug bugbug remove in production?
-  void Machine::endDraw(uint8_t cmd){
-    setHeader(cmd);
-    Serial.println(ports[0].getPort());
-    Serial.println(ports[0].direction);
-    Serial.println(ports[1].getPort());
-    Serial.println(ports[1].direction);
-  }
-
  void Machine::draw(long x, long y){
   ports[0].direction =  x < 0;
   ports[1].direction =  y < 0;
@@ -149,9 +132,9 @@ void Machine::trace(long count, long index, long x, long y){
      buzz(5);
     return; // fail safe
   }
-  long count = max(x,y/2);
+  long count = max(x,y);
   ports[0].steps = 1; // one step 
-  ports[1].steps = 2; // not sure why but y is 2x (give or take)
+  ports[1].steps = 1; // not sure why but y is 2x (give or take)
   for (long i = 1; i <= count; ++i){ 
      if (i <= x){
       ports[0].setWaitLong(i <= y); // move slower if x,y as things need to settle to avoid shaking
@@ -164,103 +147,24 @@ void Machine::trace(long count, long index, long x, long y){
   }
 }
 // read count line points from serial, this streams data
-void Machine::polylineStream(long count){
-  //Serial.setTimeout(30*1000); // we know data is coming so ok to wait for it
-  long x,y;
-  for (long i = 0; i < count; ++i){
-    get(x,y);
-    //trace(count, i, x, y);
-    //break;
-    draw(x, y);
-  }
-  endDraw(PolyLineStream);
-  //Serial.setTimeout(defaultSerialTimeout);
-}
-void Machine::polylineFancy(int count){
-}
-void Machine::ellipse(long width, long height) {
-
-  for (long y = -height; y <= height; y++) {
-    for (long x = -width; x <= width; x++) {
-      if (x*x*height*height + y*y*width*width <= height*height*width*width) {
-         draw(x, y);
-      }
+void Machine::polyline(){
+  long count = readLong();
+  if (count){
+    long *x = new long[count];
+    long *y = new long[count];
+    for (long i = 0; i < count; ++i){
+      get(x[i],y[i]);
     }
+    for (long i = 0; i < count; ++i){
+      trace(count, i+1, x[i], y[i]);
+      draw(x[i], y[i]);
+    }
+    delete x;
+    delete y;
   }
-  endDraw(xyEllipse);
-}
-//http://www.mathopenref.com/coordcirclealgorithm.html
-void Machine::circle(long r) {
-  float slice = 2 * M_PI / 10;
-  long xs[10];
-  long ys[10];// points on a line
-  for (int i = 0; i < 10; i++) {
-    float theta = slice * i;
-    xs[i] = (long)(r*cos(theta));
-    ys[i] = (long)(r*sin(theta));
-    move(xs[i],ys[i]);   
-  }
-  // move to outer cicle (would not draw this one)
-    //trace(xyCircle, x,y);
-    //draw(x, y);
-
-  /*
-  float slice = 2 * M_PI / 10;
-  for (int i = 0; i < 10; i++) {
-    float angle = slice * i;
-    long x = r * cos(angle);
-    long y = r * sin(angle);
-    trace(xyCircle, x,y);
-    //draw(x, y);
-  }
-  */
-  endDraw(xyCircle);
-}
-// direct move, no fancy line work
-void Machine::move(long x, long y){
-   draw(x, y);
-   endDraw(xyMove);
+  setHeader(xyPolyLine);
 }
 
-// fancy line to a point from current point
-void Machine::line(long x1, long y1) {
-  long x0=0, y0=0;
-  
-  long dx = abs(x1-x0), sx = x0<x1 ? 1 : -1;
-  long dy = abs(y1-y0), sy = y0<y1 ? 1 : -1; 
-  long err = (dx>dy ? dx : -dy)/2, e2;
-
-  for(;;){
-    draw(x0, y0);
-    if (x0==x1 && y0==y1) break;
-    e2 = err;
-    if (e2 >-dx) { err -= dy; x0 += sx; }
-    if (e2 < dy) { err += dx; y0 += sy; }
-  }
-  endDraw(xyLine);
-}
-
-long getPt( long n1 , long n2 , float perc ){
-    long diff = n2 - n1;
-
-    return n1 + ( diff * perc );
-}    
-//http://stackoverflow.com/questions/785097/how-do-i-implement-a-b%C3%A9zier-curve-in-c
-void Machine::bezier(long x1, long y1, long x2, long y2, long x3, long y3){
-  for( float i = 0 ; i < 1 ; i += 0.01 ){
-      // The Green Line
-      long xa = getPt( x1 , x2 , i );
-      long ya = getPt( y1 , y2 , i );
-      long xb = getPt( x2 , x3 , i );
-      long yb = getPt( y2 , y3 , i );
-  
-      // The Black Dot
-      long x = getPt( xa , xb , i );
-      long y = getPt( ya , yb , i );
-      draw(x, y);
-  } 
-  endDraw(xyBezier);
-}
 Machine machine;
 
 void Machine::exec(){
@@ -271,55 +175,10 @@ void Machine::exec(){
       return;
   }
 
-  if (packet[1] == PolyLineStream){
-    polylineStream(readLong());
+  if (packet[1] == xyPolyLine){
+    polyline();
     return;
   }
-
-  if (packet[1] == PolyLineFancy){
-    long x, y;
-    get(x,y);
-    polylineFancy(x);
-    return;
-  }
-
-  if (packet[1] == xyEllipse){
-    long x, y;
-    get(x,y);
-    ellipse(x,y);
-    return;
-  }
-  
-  if (packet[1] == xyCircle){
-    long x, y;
-    get(x,y);
-    circle(x);
-    return;
-  }
-
-  if (packet[1] == xyLine){
-    long x, y;
-    get(x,y);
-    line(x,y);
-    return;
-  }
-
-  if (packet[1] == xyMove){
-    long x, y;
-    get(x,y);
-    move(x,y);
-    return;
-  }
-
-  if (packet[1] == xyBezier){
-    long x0, y0, x1, y1, x2, y2;
-    get(x0, y0);
-    get(x1, y1);
-    get(x2, y2);
-    bezier(x0, y0, x1, y1, x2, y2);
-    return;
-  }
-
 }
 
 void buzz(int count){

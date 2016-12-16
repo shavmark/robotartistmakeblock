@@ -26,18 +26,11 @@ enum Command : uint8_t{NoCommand, SignOn, xyPolyLine,Trace  } ;
 enum DataType :uint8_t{MAKERBOT_ID=4, IKM_MAKERBOTXY=5 };
 void buzz(int count);
 
-long readLong(){
-  long data = Serial.parseInt();
-  return data;
-}
 // data always comes together
 void get(long&x, long&y){
-   while (!Serial.available()) {
-   }
-  float f = Serial.parseFloat();
-  x = (long)(f*xMax);
-  f = Serial.parseFloat();
-  y = (long)(f*yMax);
+  while (!Serial.available()) {}
+  x = (long)(Serial.parseFloat()*xMax);
+  y = (long)(Serial.parseFloat()*yMax);
 }
 
 class Port : public MePort{
@@ -98,15 +91,8 @@ class Machine {
     void polyline();
     void draw(long x, long y);
     void trace(long count, long index, long x, long y);
-  /* input data, byte 0 is not saved in packet
-   * byte 0 - 0xee (not saved in packet)
-   * byte 1 cmd 
-   * other data read by command itself
-   */
   private:
     void signon();
-    void exec();
-    uint8_t packet[2]; 
     void setHeader(uint8_t cmd);
     const int defaultSerialTimeout = 22000;
 };
@@ -148,37 +134,27 @@ void Machine::trace(long count, long index, long x, long y){
 }
 // read count line points from serial, this streams data
 void Machine::polyline(){
-  long count = readLong();
+  long count = Serial.parseInt();
   if (count){
     long *x = new long[count];
     long *y = new long[count];
-    for (long i = 0; i < count; ++i){
-      get(x[i],y[i]);
+    if (y && x){
+      for (long i = 0; i < count; ++i){
+        get(x[i],y[i]);
+      }
+      for (long i = 0; i < count; ++i){
+        trace(count, i+1, x[i], y[i]);
+        draw(x[i], y[i]);
+      }
     }
-    for (long i = 0; i < count; ++i){
-      trace(count, i+1, x[i], y[i]);
-      draw(x[i], y[i]);
+    if (y != nullptr){
+      delete y;
     }
-    delete x;
-    delete y;
+    if (x != nullptr){
+      delete x;
+    }
   }
   setHeader(xyPolyLine);
-}
-
-Machine machine;
-
-void Machine::exec(){
-
-  // sign on has no data and is set via either motor, in the future maybe each motor gets a sign on? not sure
-  if (packet[1] == SignOn){
-      signon();
-      return;
-  }
-
-  if (packet[1] == xyPolyLine){
-    polyline();
-    return;
-  }
 }
 
 void buzz(int count){
@@ -201,15 +177,6 @@ void Machine::signon(){
   Serial.println("bob"); // name
 }
 
-void setup(){  
-  
-  machine.setup(19200);
-}
-
-void loop(){
-  
-  machine.update();
-}
 
 void Machine::setup(int baud){
   buzz(1);
@@ -224,12 +191,22 @@ void Machine::setup(int baud){
   }
 
 }
-
+/* input data, byte 0 is not saved in packet
+ * byte 0 - 0xee (not saved in packet)
+ * byte 1 cmd 
+ * other data read by command itself
+ */
 int Machine::update(){
    if (Serial.available()) {
+      uint8_t packet[2]; 
       if (Serial.readBytes(packet, sizeof packet) == sizeof packet){
         if (packet[0] == 0xee){
-          exec();
+          if (packet[1] == SignOn){
+             signon();
+          }
+          else if (packet[1] == xyPolyLine){
+            polyline();
+          }
           memset(packet, 0, sizeof packet);
           return 1;
         }
@@ -238,4 +215,16 @@ int Machine::update(){
 
   return 0;
 }
+
+ Machine machine;
+
+void setup(){  
   
+  machine.setup(19200);
+}
+
+void loop(){
+  
+  machine.update();
+}
+ 
